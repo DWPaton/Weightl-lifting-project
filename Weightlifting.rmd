@@ -1,0 +1,199 @@
+---
+title: "Weight-lifting Project"
+output: html_document
+---
+##Introduction
+The advent of devices such as Jawbone Up, Nike FuelBand, and Fitbit, allow users to take and record personal physiological measurements, For the most part, people have studied the amount of work done (exercise) and the physiological reactions. A less common use for these devices is to monitor and improve the efficiency of movement during exercise. This project falls into this area and its purpose is to produce a predictive model which will use measurements to predict the type of technique when perfoming an exercise. 
+
+
+##The Data
+The experimental data was produced from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, who were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+Before deciding on the type of analysis for a project, I first had an overall look at the data.
+The data viewer in "R Studio" is limited in terms of the amount of rows and columns that it can display, so I loaded the training dataset into a spreadsheet. The most obvious feature was the large amount of missing data, both in terms of "NA"s and empty cells. Many colums were only populated with data in a few of the 19,475 rows. The folowing screenshot of the the zoomed out spreadsheet clearly shows the gaps in the data, in terms of empty cells but a similar numer of colums had been coded with "NA", (which are not visible in the screenshot).  
+
+ <img src="ScreenShot.png" height="1200px" width="900px" />  
+ 
+ 
+
+```{r global_settings}
+library(caret)
+library(rattle)
+library(randomForest)
+```
+
+
+
+```{r load_training_data}
+#dowload the data from the internet, if not already downloaded
+URLtrain<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+URLtest <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+#training data
+if(!file.exists("pml-training.csv")){
+    download.file(URLtrain, "pml-training.csv")
+ }else{
+    message("Training Data has been previously downloaded")
+  }
+#test data
+if(!file.exists("pml-testing.csv")){
+    download.file(URLtest, "pml-testing.csv")
+ }else{
+    message("Testing Data has been previously downloaded")
+  }
+
+#Read the training and test data
+# include " na.strings = c("NA","")" in the read.csv statement to convert empty values to NA
+weightdat<-read.csv(file = "pml-training.csv", stringsAsFactors= FALSE, na.strings = c("NA",""))
+weightdat_TEST<-read.csv(file = "pml-testing.csv", stringsAsFactors= FALSE, na.strings = c("NA",""))
+#calculate how bad the NA problem is
+nullvals_training<-sum(is.na(weightdat))
+numrows_training <-nrow(weightdat)
+numcols_training <- ncol(weightdat)
+allvals_training<- numrows_training * numcols_training
+good_data_ratio_training <-(1- (nullvals_training/allvals_training)) * 100
+
+```
+
+
+
+The training data has `r numcols_training` columns and  `r numrows_training`  rows, giving the total of 
+`r allvals_training` items of data of which `r nullvals_training` are NAs, giving a data quality ratio of only `r good_data_ratio_training`%.  
+
+
+
+```{r tidy_training_data}
+#analyse the distribution of NAs
+bad_results<- data.frame(Col_Name = character(numcols_training), NA_Count = numeric(numcols_training))
+bad_results[,1]<- as.character(bad_results[,1])
+for (x in 1:numcols_training){
+    bad_results[x,1]<- colnames(weightdat[x])
+    bad_results[x,2]<- sum(is.na(weightdat[x]))
+}
+#Distribution of NA values by column
+bad_cols<- (bad_results[,2] > 0)
+hist(bad_results[,2], main = "Histogram of the distribution of missing values", 
+     xlab = "Missing Values per Column")
+```
+
+
+The, above, histogram shows the distribution of NAs by column and from this we can see columns can either have 0 or 19216 NAs. As a first step these '19216' columns will be removed. The first 6 colums will also be removed. Whilst they did not contain any NA values, they are superfluous and do not play any part in the analysis.  
+
+
+```{r bad_col_names}
+bad_cols<- (bad_results[,2] > 0)
+#add cols 1:6 to the list
+bad_cols[1:6] <- TRUE
+bad_names<- names(weightdat[bad_cols])
+bad_names<- paste(bad_names,collapse = " ")
+#bad_names
+paste(bad_names,collapse = " ")
+```
+
+
+As confirmation We can see from the names of the bad columns that they are statistical values derived from the remaining data columns and as such may be safely removed.  
+
+
+```{r good_col_names}
+#remove the bad columns
+weightdat<-weightdat[!bad_cols]
+#covert the outcome vbl "classe" to a factor
+weightdat$classe<- as.factor(weightdat$classe)
+#The training data has been restructured, so do the same to the test data
+weightdat_TEST<-weightdat_TEST[!bad_cols]
+#display the new structure of the data
+str(weightdat)
+```
+
+
+The structure of the final revised dataset is shown above.  
+
+
+##The Model
+I have chosen to use the **Random Forest** algorithm to build a model and make predictions for the following reasons:-
+
+*   It has established a reputation as being one of the best algorithms in terms of producing
+accurate predictions with both 'in sample' and 'out of sample' data.
+*   It is an automated process, in terms of variable selection and this removes the need to have specialised domain knowledge to construct a model manually.
+*   Cross-validation is conducted internally in the algorithm.
+
+The training data was initially split into train and test data on an 80-20 split. The memory limitations of my Win 7 32 bit pc rendered this impossible and I had to settle for a 30-70 split. While this was far from ideal, it provided training and test sets of 5889 and 13733 oservations, which seemed large enough to produce a model.  
+I experienced many problems using "caret" package to train the random forest, so I reverted to using the "randomForest" package and this solved the problems.  
+The memory problem has prevented me from doing explicit cross validation, howerve cross validation is performed internally in the algorithm.
+
+```{r split_data_and_build_model}
+set.seed(1234)
+#I initially set the p value as 0.8 to get an 80 (training) to (testing) split 
+#Unfortunately this did not work due to memory problem.
+#I have a 32 bit Win 7 pc, which is restricted to a total of 4GB of RAM so I had to
+#change the p value to 0.3
+training_records <- createDataPartition(y=weightdat$classe, p=0.3, list = FALSE)
+train_dat<- weightdat[training_records,]
+test_dat<- weightdat[-training_records,]
+
+#remove all data currently not in use to conserve memory
+rm(weightdat)
+rm(bad_cols)
+rm(bad_results)
+rm(bad_names)
+rm(training_records)
+
+
+#build the model
+
+model <-randomForest(classe~., data=train_dat, ntree = 500, 
+                      method = "cv",  allowParallel = TRUE,
+                      proximity = TRUE)
+
+In_sample_predictions<- predict(model, newdata = train_dat)
+Out_of_sample_predictions <-  predict(model, newdata = test_dat)
+
+Test_Data_predictions <- predict(model, newdata = weightdat_TEST)
+varImpPlot(model)
+```
+
+
+The above plot shows the relative importance of the predictor variables
+
+
+###In Sample Predictions
+```{r in_sample_predictions}
+confusionMatrix(In_sample_predictions, train_dat$classe)
+
+```
+
+###Out of Sample Predictions
+```{r out_of_sample_predictions}
+confusionMatrix(Out_of_sample_predictions, test_dat$classe)
+```
+
+###Test Data Predictions
+```{r test_data_predictions}
+Test_Data_predictions
+```
+
+```{r submit_answers}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(Test_Data_predictions)
+
+```
+
+
+##Conclusions
+As discussed earlier, the memory limitations on my pc placed restrictions on the amount of data that could be used to create the model. The resulting 30% - 70% split between "in sample" and "out of sample" data was roughly the opposite of what one would normally choose in an experimental design. 
+It was therefore with some trepidation that I ran the random forest algorithm, fully expecting that I would have to choose an alternative algorithm which would free me from the memory restrictions. 
+Given these restrictions, I had not expected high accuracy of the predictions of the training data and I expected the accuracy of the test data predictions to be even worse.
+I was pleasantly surprised when looking at the results:-
+
+*    **Training Data Accuracy (in sample - 5889 obsevations)        = 1.000**
+*    **Test Data Accuracy (out of sample - 13773 obsevations)       = 0.988**
+*    **Unseen Test Data Accuracy (out of sample - 20 observations)  = 1.000**
+
+The random forest algorithm has provided a model with high accuracy model and th only drops to 0.988 when tested against the out of sample data. The restrictions are now an advantage in that the I am confident that I have a robust model, given the large amount of out of sample data.
+The accuracy and robustness of the model are so good that I can imagine a commercial application used in health clubs and gyms, where new users, wired up to a pc, running the app, would be able to gain instant feedback on their technique. 
+Unfortunately given the memory restrictions an app such as this (using random forests) could not be applied to the lucrative mobile phone and tablet market.  
+
